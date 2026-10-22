@@ -97,18 +97,27 @@ assert.match(
 assert.ok(!stripAnsi(render()).includes("Last timer"), "no last-fire block before any fire");
 console.log("✓ adjust screen renders, default 30 min + live target-time conversion");
 
-// 2. hold ↓ x12 with acceleration: 4×1 + 6×5 + 2×10 = 54 → 84
+// 2. hold ↓ x12 with acceleration: run 0..11 → 5×1 + 6×5 + 1×10 = 45 → 75
 for (let i = 0; i < 12; i++) press("\x1b[B");
-assert.match(stripAnsi(render()), /84 min/);
-assert.match(stripAnsi(render()), /in 1 h 24 min →/, "conversion follows adjustments");
-console.log("✓ hold ↓ accelerates (30 → 84 after 12 rapid presses), conversion follows");
+assert.match(stripAnsi(render()), /75 min/);
+assert.match(stripAnsi(render()), /in 1 h 15 min →/, "conversion follows adjustments");
+console.log("✓ hold ↓ accelerates (30 → 75 after 12 auto-repeat presses), conversion follows");
 
-// 3. acceleration resets after a pause
-await new Promise((r) => setTimeout(r, 500));
-press("\x1b[B"); // fresh run → step 1
+// 3. deliberate tapping (≥150 ms apart) NEVER accelerates — 1 min per press
+for (let i = 0; i < 10; i++) {
+	await new Promise((r) => setTimeout(r, 150));
+	press("\x1b[B");
+}
 assert.match(stripAnsi(render()), /85 min/);
-press("\x1b[A"); // up decreases, fresh run → step 1
-assert.match(stripAnsi(render()), /84 min/);
+assert.match(stripAnsi(render()), /hold to accelerate \(now 1 min\/press\)/, "ramp resets to 1");
+console.log("✓ fast deliberate tapping stays at 1 min/press (85 after 10 taps)");
+
+// 3b. pause also resets
+await new Promise((r) => setTimeout(r, 500));
+press("\x1b[B"); // fresh press → step 1
+assert.match(stripAnsi(render()), /86 min/);
+press("\x1b[A"); // up decreases, fresh press → step 1
+assert.match(stripAnsi(render()), /85 min/);
 console.log("✓ acceleration resets on pause; ↑ decreases");
 
 // 4. direct digit entry

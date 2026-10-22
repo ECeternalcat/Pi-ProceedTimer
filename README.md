@@ -45,9 +45,10 @@ pi install ./pi-proceed-timer
 ──────────────────────────────────────────────
 ```
 
-- **↓ increases, ↑ decreases.** Holding a key accelerates: steps of 1 → 5 →
-  10 → 30 minutes per press as the auto-repeat continues. Release 450 ms to
-  reset.
+- **↓ increases, ↑ decreases** — one minute per press, no matter how fast
+  you tap (deliberate presses never trigger the acceleration ramp).
+- **Hold** a key to accelerate: the terminal's auto-repeat drives steps of
+  5 → 10 → 30 minutes per press; release to reset the ramp.
 - **Type digits** to enter a value directly (`120`), Backspace edits.
 - The **live conversion line** under the value shows the equivalent duration
   (`in 1 h 24 min`) and the target time in your timezone and UTC, updating as

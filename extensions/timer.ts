@@ -48,7 +48,9 @@ const MAX_MINUTES = 1440; // 24 h
 const DEFAULT_MINUTES = 30;
 const MAX_TYPED_DIGITS = 4;
 const STATUS_KEY = "timer";
-const ACCEL_RESET_MS = 450; // gap that separates deliberate presses from key-repeat
+const REPEAT_MS = 120; // inter-press gap counted as terminal key auto-repeat
+// (typically 30–60 ms). Slower presses — even fast deliberate tapping —
+// never accelerate, so tapping always moves one minute at a time.
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -271,10 +273,12 @@ class TimerScreen {
 			}
 			const dir = down ? 1 : -1;
 			const now = Date.now();
-			if (dir !== this.lastDir || now - this.lastTime > ACCEL_RESET_MS) this.run = 0;
+			// Accelerate only on true terminal auto-repeat (bursts ≤ REPEAT_MS
+			// apart). Deliberate presses — however fast — reset the ramp.
+			if (dir !== this.lastDir || now - this.lastTime > REPEAT_MS) this.run = 0;
+			else this.run += 1;
 			this.lastDir = dir;
 			this.lastTime = now;
-			this.run += 1;
 			this.minutes = clampMinutes(this.minutes + dir * stepFor(this.run));
 			this.refresh();
 			return;
@@ -384,7 +388,7 @@ class TimerScreen {
 			lines.push(pad + big);
 			lines.push(subPad + sub);
 			lines.push("");
-			lines.push(` ${t.fg("dim", `↓ increase · ↑ decrease · hold longer = faster (now ${stepFor(this.run)} min/press)`)}`);
+			lines.push(` ${t.fg("dim", `↓ +1 · ↑ −1 · hold to accelerate (now ${stepFor(this.run)} min/press)`)}`);
 			lines.push(` ${t.fg("dim", "type digits to enter directly · backspace edits")}`);
 			lines.push("");
 			lines.push(` ${t.fg("dim", "Enter continue · Esc cancel")}`);
