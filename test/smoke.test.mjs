@@ -89,13 +89,19 @@ const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
 openUI("");
 assert.match(stripAnsi(render()), /How many minutes should pi wait\?/);
 assert.match(stripAnsi(render()), /30 min/);
+assert.match(
+	stripAnsi(render()),
+	/in 30 min → (Mon |Tue |Wed |Thu |Fri |Sat |Sun )?\d\d:\d\d \(GMT[^)]*\) · (Mon |Tue |Wed |Thu |Fri |Sat |Sun )?\d\d:\d\d UTC/,
+	"live conversion line",
+);
 assert.ok(!stripAnsi(render()).includes("Last timer"), "no last-fire block before any fire");
-console.log("✓ adjust screen renders, default 30 min, no last-fire block yet");
+console.log("✓ adjust screen renders, default 30 min + live target-time conversion");
 
 // 2. hold ↓ x12 with acceleration: 4×1 + 6×5 + 2×10 = 54 → 84
 for (let i = 0; i < 12; i++) press("\x1b[B");
 assert.match(stripAnsi(render()), /84 min/);
-console.log("✓ hold ↓ accelerates (30 → 84 after 12 rapid presses)");
+assert.match(stripAnsi(render()), /in 1 h 24 min →/, "conversion follows adjustments");
+console.log("✓ hold ↓ accelerates (30 → 84 after 12 rapid presses), conversion follows");
 
 // 3. acceleration resets after a pause
 await new Promise((r) => setTimeout(r, 500));
@@ -108,10 +114,12 @@ console.log("✓ acceleration resets on pause; ↑ decreases");
 // 4. direct digit entry
 for (const d of "120") press(d);
 assert.match(stripAnsi(render()), /120▏ min/);
+assert.match(stripAnsi(render()), /in 2 h →/, "conversion follows typed digits");
 press("\x7f"); // backspace
 assert.match(stripAnsi(render()), /12▏ min/);
+assert.match(stripAnsi(render()), /in 12 min →/);
 press("0");
-console.log("✓ digit entry + backspace work");
+console.log("✓ digit entry + backspace work, conversion tracks the typed value");
 
 // 5. Enter → confirm screen with local + UTC times, Confirm preselected
 press("\r");

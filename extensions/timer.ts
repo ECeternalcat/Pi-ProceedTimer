@@ -8,7 +8,9 @@
  * Usage:
  *   /timer              interactive setup:
  *                        1) pick minutes — ↓ increase / ↑ decrease, hold longer
- *                           to step faster; or type digits directly
+ *                           to step faster; or type digits directly. A live
+ *                           line under the value converts it to the target
+ *                           local/UTC time.
  *                        2) confirm screen showing the target time in your
  *                           timezone and UTC — Readjust / Confirm (default)
  *   /timer <minutes>    skip straight to the confirm screen
@@ -91,12 +93,26 @@ function formatUTC(d: Date): string {
 	return `${fmtClock(d, "UTC")} UTC`;
 }
 
-/** Local "HH:MM" for compact status-bar text. */
-function fmtHM(d: Date): string {
-	return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hour12: false })
+/** "HH:MM" (in the given or local timezone) for compact status text. */
+function fmtHM(d: Date, timeZone?: string): string {
+	return new Intl.DateTimeFormat(undefined, { timeZone, hour: "2-digit", minute: "2-digit", hour12: false })
 		.format(d)
 		.replace(/\u202f/g, " ")
 		.replace("24:", "00:");
+}
+
+/** "HH:MM", with a weekday prefix when the target is not today in that zone. */
+function fmtTarget(d: Date, timeZone?: string): string {
+	const hm = fmtHM(d, timeZone);
+	const dayFmt = new Intl.DateTimeFormat("en-CA", {
+		timeZone,
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+	});
+	if (dayFmt.format(d) === dayFmt.format(new Date())) return hm;
+	const weekday = new Intl.DateTimeFormat("en-GB", { timeZone, weekday: "short" }).format(d);
+	return `${weekday} ${hm}`;
 }
 
 /** ms → "m:ss" or "h:mm:ss" */
@@ -181,12 +197,16 @@ class TimerScreen {
 	// -- lifecycle helpers ---------------------------------------------------
 
 	private tick(): void {
-		if (this.finished || this.phase !== "view") return;
-		const left = timer ? timer.endsAt - Date.now() : 0;
-		if (left <= 0) {
-			this.finish({ type: "expired" });
-			return;
+		if (this.finished || this.phase === "confirm") return;
+		if (this.phase === "view") {
+			const left = timer ? timer.endsAt - Date.now() : 0;
+			if (left <= 0) {
+				this.finish({ type: "expired" });
+				return;
+			}
 		}
+		// Keep the adjust screen's live "→ target time" line fresh even when
+		// no key is pressed; the view screen counts down every second.
 		this.invalidate();
 		this.tui.requestRender();
 	}
@@ -350,7 +370,19 @@ class TimerScreen {
 
 			lines.push(` ${t.fg("text", "How many minutes should pi wait?")}`);
 			lines.push("");
+
+			// Live conversion: what the current value means in wall-clock time.
+			const pending = this.typed ? clampMinutes(parseInt(this.typed, 10)) : this.minutes;
+			const target = new Date(Date.now() + pending * 60_000);
+			const zone = zoneName(target);
+			const sub = t.fg(
+				"muted",
+				`in ${humanMinutes(pending)} → ${fmtTarget(target)}${zone ? ` (${zone})` : ""} · ${fmtTarget(target, "UTC")} UTC`,
+			);
+			const subPad = " ".repeat(Math.max(0, Math.floor((w - visibleWidth(sub)) / 2)));
+
 			lines.push(pad + big);
+			lines.push(subPad + sub);
 			lines.push("");
 			lines.push(` ${t.fg("dim", `↓ increase · ↑ decrease · hold longer = faster (now ${stepFor(this.run)} min/press)`)}`);
 			lines.push(` ${t.fg("dim", "type digits to enter directly · backspace edits")}`);

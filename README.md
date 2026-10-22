@@ -36,6 +36,7 @@ pi install ./pi-proceed-timer
  How many minutes should pi wait?
 
                    30 min
+     in 30 min → 18:55 (GMT+8) · 10:55 UTC
 
  ↓ increase · ↑ decrease · hold longer = faster (now 1 min/press)
  type digits to enter directly · backspace edits
@@ -48,6 +49,10 @@ pi install ./pi-proceed-timer
   10 → 30 minutes per press as the auto-repeat continues. Release 450 ms to
   reset.
 - **Type digits** to enter a value directly (`120`), Backspace edits.
+- The **live conversion line** under the value shows the equivalent duration
+  (`in 1 h 24 min`) and the target time in your timezone and UTC, updating as
+  you adjust — and refreshing every second while the screen is open. Targets
+  on another day get a weekday prefix (`Sat 01:15`).
 - Range: 1–1440 minutes.
 
 ### Confirming
