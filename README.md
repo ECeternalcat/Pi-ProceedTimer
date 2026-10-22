@@ -10,17 +10,29 @@ so you read the message and start the timer yourself.
 
 ## Install
 
-Install from **one** channel only. A local checkout, the npm package, and a
-git checkout are distinct packages to pi — installing several at once loads
-several copies of this extension. The extension keeps `/timer`
+Install from **one** channel per machine. A local checkout, the npm
+package, and a git checkout are distinct packages to pi — installing several
+at once loads several copies of this extension. The extension keeps `/timer`
 single-registered (the first copy to load wins, the others stay dormant),
-but you should still remove the extras with `pi remove <source>`:
+but you should still remove the extras with `pi remove <source>`.
+
+For daily use, install from npm:
 
 ```bash
-pi install npm:pi-proceed-timer                               # from npm
-pi install git:github.com/ECeternalcat/Pi-ProceedTimer@v1.0.0  # from GitHub
-pi install ./pi-proceed-timer                                  # from a local checkout
+pi install npm:pi-proceed-timer
 ```
+
+Alternatives:
+
+```bash
+# from GitHub, pinned to a tag
+pi install git:github.com/ECeternalcat/Pi-ProceedTimer@v1.0.0
+# from a local checkout (development — see below)
+pi install ./Pi-ProceedTimer
+```
+
+Update the npm copy with `pi update --extensions`; remove any copy with
+`pi remove <source>`.
 
 ## Usage
 
@@ -128,13 +140,27 @@ The smoke test drives the whole UI flow with fake TUI/theme/keybindings
 objects and fast-forwards timers with `node:test` mock timers — no terminal
 or model needed.
 
-To develop against a live pi, install this checkout as a local package and
-reload after edits:
+To develop against a live pi, clone the repo and install it as a local
+package — pi loads extensions straight from that path, so edits take effect
+after `/reload` with no copy step. Keep the dev machine on the local install
+only (skip the npm one there):
 
 ```bash
-pi install "D:/Code/pi proceed timer"
-# in pi: /reload
+git clone https://github.com/ECeternalcat/Pi-ProceedTimer.git
+cd Pi-ProceedTimer
+pi install .
+# edit extensions/timer.ts, then in pi: /reload
 ```
+
+## Release
+
+Maintainer steps:
+
+1. `npm version patch|minor|major` (bumps `package.json`, commits, tags)
+2. `git push --follow-tags`
+3. `npm publish` — requires 2FA; npm opens a browser page to approve
+4. verify with `npm view pi-proceed-timer version` and
+   `pi install npm:pi-proceed-timer` on another machine
 
 ## License
 
