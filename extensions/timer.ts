@@ -42,6 +42,10 @@ import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-wor
 import type { KeybindingsManager, TUI } from "@earendil-works/pi-tui";
 import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
+/** Cross-install sentinel (process-global via Symbol.for): keeps /timer
+ * single-registered when two copies of this extension are loaded at once. */
+const TIMER_SENTINEL = Symbol.for("pi-proceed-timer/registered");
+
 const PROCEED_PROMPT = "proceed";
 const MIN_MINUTES = 1;
 const MAX_MINUTES = 1440; // 24 h
@@ -593,6 +597,15 @@ async function runTimerUI(
 }
 
 export default function (pi: ExtensionAPI) {
+	// The same extension can be installed through two channels at once — a
+	// local checkout and the npm package are distinct packages to pi, and each
+	// copy would register its own /timer. Keep it single-registered: the first
+	// copy to load wins, later copies stay dormant. The winning runtime's
+	// session_shutdown releases the slot so a reload re-registers cleanly.
+	const g = globalThis as unknown as Record<symbol, unknown>;
+	if (g[TIMER_SENTINEL]) return;
+	g[TIMER_SENTINEL] = true;
+
 	// A run observed after dispatch means the agent actually resumed (a
 	// queued message alone does not guarantee that).
 	pi.on("agent_start", () => {
@@ -608,6 +621,7 @@ export default function (pi: ExtensionAPI) {
 		lastFire = undefined;
 		statusText(undefined);
 		uiRef = undefined;
+		delete g[TIMER_SENTINEL];
 	});
 
 	pi.registerCommand("timer", {

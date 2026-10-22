@@ -6,6 +6,14 @@
 		"pi-package"
 	],
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/ECeternalcat/Pi-ProceedTimer.git"
+	},
+	"homepage": "https://github.com/ECeternalcat/Pi-ProceedTimer#readme",
+	"bugs": {
+		"url": "https://github.com/ECeternalcat/Pi-ProceedTimer/issues"
+	},
 	"type": "module",
 	"files": [
 		"extensions",

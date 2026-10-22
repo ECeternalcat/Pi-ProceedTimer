@@ -314,6 +314,24 @@ const completions = registrations.commands.timer.getArgumentCompletions("c");
 assert.deepStrictEqual(completions, [{ value: "cancel", label: "cancel", description: "cancel the running timer" }]);
 console.log("✓ argument completions work");
 
+// 22. duplicate-load guard: with two copies installed (e.g. local path + npm),
+// only the first to load registers /timer; the second stays dormant; a
+// shutdown releases the slot so the next runtime re-registers.
+const mkPi = (cmds) => ({
+	registerCommand: (n, o) => (cmds[n] = o),
+	on: () => {},
+	sendUserMessage: () => {},
+});
+// test 19's session_shutdown released the sentinel → a fresh copy registers
+const cmdsA = {};
+mod.default(mkPi(cmdsA));
+assert.ok(cmdsA.timer, "fresh runtime re-registers after shutdown");
+// a second copy loaded alongside the first stays dormant
+const cmdsB = {};
+mod.default(mkPi(cmdsB));
+assert.deepStrictEqual(Object.keys(cmdsB), [], "second copy registers nothing");
+console.log("✓ duplicate install stays dormant; reload re-registers");
+
 console.log("\nALL TESTS PASSED");
 
 // Some screens keep 1s refresh intervals alive on purpose; a smoke test may

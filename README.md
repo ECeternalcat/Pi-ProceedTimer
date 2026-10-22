@@ -10,10 +10,16 @@ so you read the message and start the timer yourself.
 
 ## Install
 
+Install from **one** channel only. A local checkout, the npm package, and a
+git checkout are distinct packages to pi — installing several at once loads
+several copies of this extension. The extension keeps `/timer`
+single-registered (the first copy to load wins, the others stay dormant),
+but you should still remove the extras with `pi remove <source>`:
+
 ```bash
-pi install npm:pi-proceed-timer
-# or from a checkout:
-pi install ./pi-proceed-timer
+pi install npm:pi-proceed-timer                               # from npm
+pi install git:github.com/ECeternalcat/Pi-ProceedTimer@v1.0.0  # from GitHub
+pi install ./pi-proceed-timer                                  # from a local checkout
 ```
 
 ## Usage
