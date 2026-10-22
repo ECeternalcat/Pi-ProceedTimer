@@ -139,11 +139,15 @@ function clampMinutes(v: number): number {
 	return Math.min(MAX_MINUTES, Math.max(MIN_MINUTES, Math.round(v)));
 }
 
-/** Acceleration: the longer the key is held (auto-repeat), the bigger the step. */
+/**
+ * Acceleration: the longer the key is held (auto-repeat), the bigger the step.
+ * With a typical ~30 repeats/s terminal, the 5-min tier starts after ~0.3 s
+ * of holding, 10-min after ~0.7 s, and 30-min after ~1.4 s.
+ */
 function stepFor(run: number): number {
-	if (run <= 4) return 1;
-	if (run <= 10) return 5;
-	if (run <= 20) return 10;
+	if (run <= 8) return 1;
+	if (run <= 20) return 5;
+	if (run <= 40) return 10;
 	return 30;
 }
 

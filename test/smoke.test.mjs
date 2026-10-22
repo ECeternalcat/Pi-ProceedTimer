@@ -97,27 +97,33 @@ assert.match(
 assert.ok(!stripAnsi(render()).includes("Last timer"), "no last-fire block before any fire");
 console.log("✓ adjust screen renders, default 30 min + live target-time conversion");
 
-// 2. hold ↓ x12 with acceleration: run 0..11 → 5×1 + 6×5 + 1×10 = 45 → 75
+// 2. hold ↓ x12 with acceleration: run 0..11 → 9×1 + 3×5 = 24 → 54
 for (let i = 0; i < 12; i++) press("\x1b[B");
-assert.match(stripAnsi(render()), /75 min/);
-assert.match(stripAnsi(render()), /in 1 h 15 min →/, "conversion follows adjustments");
-console.log("✓ hold ↓ accelerates (30 → 75 after 12 auto-repeat presses), conversion follows");
+assert.match(stripAnsi(render()), /54 min/);
+assert.match(stripAnsi(render()), /in 54 min →/, "conversion follows adjustments");
+console.log("✓ hold ↓ accelerates gently (30 → 54 after 12 auto-repeat presses), conversion follows");
+
+// 2b. deeper hold reaches the higher tiers: runs 12..44 → 9×5 + 20×10 + 4×30 = 365 → 419
+for (let i = 0; i < 33; i++) press("\x1b[B");
+assert.match(stripAnsi(render()), /419 min/);
+assert.match(stripAnsi(render()), /now 30 min\/press/, "top tier reached on deep hold");
+console.log("✓ deep hold reaches 10- and 30-min tiers (54 → 419 after 33 more repeats)");
 
 // 3. deliberate tapping (≥150 ms apart) NEVER accelerates — 1 min per press
 for (let i = 0; i < 10; i++) {
 	await new Promise((r) => setTimeout(r, 150));
 	press("\x1b[B");
 }
-assert.match(stripAnsi(render()), /85 min/);
-assert.match(stripAnsi(render()), /hold to accelerate \(now 1 min\/press\)/, "ramp resets to 1");
-console.log("✓ fast deliberate tapping stays at 1 min/press (85 after 10 taps)");
+assert.match(stripAnsi(render()), /429 min/);
+assert.match(stripAnsi(render()), /hold to accelerate \(now 1 min\/press\)/, "ramp resets to 1 after release");
+console.log("✓ fast deliberate tapping stays at 1 min/press (419 → 429 after 10 taps)");
 
 // 3b. pause also resets
 await new Promise((r) => setTimeout(r, 500));
 press("\x1b[B"); // fresh press → step 1
-assert.match(stripAnsi(render()), /86 min/);
+assert.match(stripAnsi(render()), /430 min/);
 press("\x1b[A"); // up decreases, fresh press → step 1
-assert.match(stripAnsi(render()), /85 min/);
+assert.match(stripAnsi(render()), /429 min/);
 console.log("✓ acceleration resets on pause; ↑ decreases");
 
 // 4. direct digit entry
