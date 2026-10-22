@@ -114,6 +114,7 @@ session is switched, reloaded, or closed.
   `/timer cancel`; a bare `/timer` reports the remaining time.
 - The `proceed` text and timings are not configurable yet; edit
   `extensions/timer.ts` constants if you need different behavior.
+- The timer sends proceed once at the scheduled time. It does not bypass provider rate limits or automatically detect when quotas reset. Pi must remain running for the timer to fire.  
 
 ## Development
 

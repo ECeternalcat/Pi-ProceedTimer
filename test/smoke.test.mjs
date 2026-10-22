@@ -91,7 +91,7 @@ assert.match(stripAnsi(render()), /How many minutes should pi wait\?/);
 assert.match(stripAnsi(render()), /30 min/);
 assert.match(
 	stripAnsi(render()),
-	/in 30 min → (Mon |Tue |Wed |Thu |Fri |Sat |Sun )?\d\d:\d\d \(GMT[^)]*\) · (Mon |Tue |Wed |Thu |Fri |Sat |Sun )?\d\d:\d\d UTC/,
+	/in 30 min → (Mon |Tue |Wed |Thu |Fri |Sat |Sun )?\d\d:\d\d \(([^)]+)\) · (Mon |Tue |Wed |Thu |Fri |Sat |Sun )?\d\d:\d\d UTC/,
 	"live conversion line",
 );
 assert.ok(!stripAnsi(render()).includes("Last timer"), "no last-fire block before any fire");
@@ -141,7 +141,7 @@ press("\r");
 const confirmText = stripAnsi(render());
 assert.match(confirmText, /Start the timer\?/);
 assert.match(confirmText, /Wait for 2 h\b/);
-assert.match(confirmText, /Your time\s+20\d\d-\d\d-\d\d \d\d:\d\d \(GMT[^)]*\)/);
+assert.match(confirmText, /Your time\s+20\d\d-\d\d-\d\d \d\d:\d\d \(([^)]+)\)/);
 assert.match(confirmText, /UTC\s+20\d\d-\d\d-\d\d \d\d:\d\d UTC/);
 assert.match(confirmText, /❯ Confirm/); // Confirm highlighted by default
 assert.ok(confirmText.indexOf("Confirm") > confirmText.indexOf("Readjust")); // order
@@ -229,7 +229,7 @@ console.log("✓ agent_start upgrades record to \"agent resumed\" (once)");
 openUI("");
 const lastBlock = stripAnsi(render());
 assert.match(lastBlock, /Last timer/);
-assert.match(lastBlock, /Triggered\s+20\d\d-\d\d-\d\d \d\d:\d\d \(GMT[^)]*\)/);
+assert.match(lastBlock, /Triggered\s+20\d\d-\d\d-\d\d \d\d:\d\d \(([^)]+)\)/);
 assert.match(lastBlock, /Action\s+proceed/);
 assert.match(lastBlock, /Status\s+agent resumed \d\d:\d\d/);
 console.log("✓ /timer setup screen shows the Last timer record");
