@@ -11,9 +11,12 @@
  *                           to step faster; or type digits directly. A live
  *                           line under the value converts it to the target
  *                           local/UTC time.
- *                        2) confirm screen showing the target time in your
- *                           timezone and UTC — Readjust / Confirm (default)
- *   /timer <minutes>    skip straight to the confirm screen
+ *                        2) choose the message pi sends when the timer ends:
+ *                           "proceed" (default) or Custom… free text
+ *                        3) confirm screen showing the duration, target time
+ *                           in your timezone and UTC, and the message —
+ *                           Readjust / Confirm (default)
+ *   /timer <minutes>    start at the message step with the given duration
  *   /timer cancel       cancel the running timer (works in any mode)
  *
  * While a timer runs, /timer shows remaining time plus the target local/UTC
@@ -39,8 +42,8 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
-import type { KeybindingsManager, TUI } from "@earendil-works/pi-tui";
-import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { EditorTheme, KeybindingsManager, TUI } from "@earendil-works/pi-tui";
+import { Editor, Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 /** Cross-install sentinel (process-global via Symbol.for): keeps /timer
  * single-registered when two copies of this extension are loaded at once. */
@@ -51,6 +54,7 @@ const MIN_MINUTES = 1;
 const MAX_MINUTES = 1440; // 24 h
 const DEFAULT_MINUTES = 30;
 const MAX_TYPED_DIGITS = 4;
+const MAX_PROMPT_LEN = 200; // hard cap for a custom message
 const STATUS_KEY = "timer";
 const REPEAT_MS = 120; // inter-press gap counted as terminal key auto-repeat
 // (typically 30–60 ms). Slower presses — even fast deliberate tapping —
@@ -143,6 +147,40 @@ function clampMinutes(v: number): number {
 	return Math.min(MAX_MINUTES, Math.max(MIN_MINUTES, Math.round(v)));
 }
 
+/** Clip long text for compact one-line display. */
+function shorten(s: string, max: number): string {
+	return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+/** Word-wrap `text` into at most `maxLines` lines of `width` columns. */
+function wrapCompact(text: string, width: number, maxLines: number): string[] {
+	if (width < 4) return [shorten(text, 3)];
+	const words = text.split(/\s+/).filter(Boolean);
+	const lines: string[] = [];
+	let cur = "";
+	for (const word of words) {
+		if (cur && `${cur} ${word}`.length <= width) {
+			cur += ` ${word}`;
+			continue;
+		}
+		if (cur) lines.push(cur);
+		// hard-split a single word longer than the line
+		let rest = word;
+		while (rest.length > width) {
+			lines.push(rest.slice(0, width));
+			rest = rest.slice(width);
+		}
+		cur = rest;
+	}
+	if (cur) lines.push(cur);
+	if (lines.length > maxLines) {
+		const head = lines.slice(0, maxLines - 1);
+		const tail = shorten(lines.slice(maxLines - 1).join(" "), width);
+		return [...head, tail];
+	}
+	return lines;
+}
+
 /**
  * Acceleration: the longer the key is held (auto-repeat), the bigger the step.
  * With a typical ~30 repeats/s terminal, the 5-min tier starts after ~0.3 s
@@ -160,15 +198,17 @@ function stepFor(run: number): number {
 // ---------------------------------------------------------------------------
 
 type TimerUIResult =
-	| { type: "started"; minutes: number }
+	| { type: "started"; minutes: number; prompt: string }
 	| { type: "cancelled" }
 	| { type: "closed" }
 	| { type: "expired" };
 
 class TimerScreen {
-	private phase: "adjust" | "confirm" | "view";
+	private phase: "adjust" | "prompt" | "input" | "confirm" | "view";
 	private minutes: number;
 	private typed = "";
+	private promptChoice: 0 | 1 = 0; // message step: 0 = proceed, 1 = Custom…
+	private prompt = PROCEED_PROMPT;
 	private choice: 0 | 1 = 1; // index of the highlighted button
 	private run = 0; // consecutive same-direction key presses
 	private lastDir = 0;
@@ -181,17 +221,18 @@ class TimerScreen {
 	private readonly theme: Theme;
 	private readonly kb: KeybindingsManager;
 	private readonly done: (result: TimerUIResult | undefined) => void;
-	private readonly onStart: (minutes: number) => void;
+	private readonly onStart: (minutes: number, prompt: string) => void;
 	private readonly onCancel: () => void;
+	private readonly editor: Editor;
 
 	constructor(
 		tui: TUI,
 		theme: Theme,
 		kb: KeybindingsManager,
 		done: (result: TimerUIResult | undefined) => void,
-		onStart: (minutes: number) => void,
+		onStart: (minutes: number, prompt: string) => void,
 		onCancel: () => void,
-		initial: { minutes?: number; phase?: "adjust" | "confirm" | "view" },
+		initial: { minutes?: number; phase?: "adjust" | "prompt" | "view" },
 	) {
 		this.tui = tui;
 		this.theme = theme;
@@ -202,12 +243,33 @@ class TimerScreen {
 		this.minutes = clampMinutes(initial.minutes ?? DEFAULT_MINUTES);
 		this.phase = initial.phase ?? "adjust";
 		this.tickId = setInterval(() => this.tick(), 1000);
+
+		const editorTheme: EditorTheme = {
+			borderColor: (s) => theme.fg("accent", s),
+			selectList: {
+				selectedPrefix: (s) => theme.fg("accent", s),
+				selectedText: (s) => theme.fg("accent", s),
+				description: (s) => theme.fg("muted", s),
+				scrollInfo: (s) => theme.fg("dim", s),
+				noMatch: (s) => theme.fg("warning", s),
+			},
+		};
+		this.editor = new Editor(tui, editorTheme);
+		this.editor.onSubmit = (value: string) => {
+			if (this.finished) return;
+			const v = value.trim().slice(0, MAX_PROMPT_LEN);
+			if (!v) return; // empty message: stay in input
+			this.prompt = v;
+			this.phase = "confirm";
+			this.choice = 1; // Confirm is the default
+			this.refresh();
+		};
 	}
 
 	// -- lifecycle helpers ---------------------------------------------------
 
 	private tick(): void {
-		if (this.finished || this.phase === "confirm") return;
+		if (this.finished || (this.phase !== "view" && this.phase !== "adjust")) return;
 		if (this.phase === "view") {
 			const left = timer ? timer.endsAt - Date.now() : 0;
 			if (left <= 0) {
@@ -250,8 +312,9 @@ class TimerScreen {
 	handleInput(data: string): void {
 		if (this.finished) return;
 		if (this.phase === "adjust") this.handleAdjust(data);
-		else if (this.phase === "confirm") this.handleTwoChoice(data, "confirm");
-		else this.handleTwoChoice(data, "view");
+		else if (this.phase === "prompt") this.handlePromptChoice(data);
+		else if (this.phase === "input") this.handlePromptInput(data);
+		else this.handleTwoChoice(data, this.phase === "confirm" ? "confirm" : "view");
 	}
 
 	private handleAdjust(data: string): void {
@@ -298,8 +361,7 @@ class TimerScreen {
 				this.typed = "";
 			}
 			this.run = 0;
-			this.phase = "confirm";
-			this.choice = 1; // Confirm is the default
+			this.phase = "prompt";
 			this.refresh();
 			return;
 		}
@@ -307,6 +369,50 @@ class TimerScreen {
 		if (this.kb.matches(data, "tui.select.cancel")) {
 			this.finish(undefined);
 		}
+	}
+
+	private handlePromptChoice(data: string): void {
+		const nav =
+			this.kb.matches(data, "tui.select.up") ||
+			this.kb.matches(data, "tui.select.down") ||
+			matchesKey(data, Key.left) ||
+			matchesKey(data, Key.right) ||
+			matchesKey(data, Key.tab) ||
+			matchesKey(data, Key.shift("tab"));
+		if (nav) {
+			this.promptChoice = this.promptChoice === 0 ? 1 : 0;
+			this.refresh();
+			return;
+		}
+		if (this.kb.matches(data, "tui.select.confirm")) {
+			if (this.promptChoice === 0) {
+				this.prompt = PROCEED_PROMPT;
+				this.phase = "confirm";
+				this.choice = 1; // Confirm is the default
+				this.refresh();
+			} else {
+				// Keep the previous custom message around for quick edits.
+				this.editor.setText(this.prompt === PROCEED_PROMPT ? "" : this.prompt);
+				this.phase = "input";
+				this.refresh();
+			}
+			return;
+		}
+		if (this.kb.matches(data, "tui.select.cancel")) {
+			this.phase = "adjust"; // back to the minutes step
+			this.refresh();
+		}
+	}
+
+	private handlePromptInput(data: string): void {
+		if (this.kb.matches(data, "tui.select.cancel")) {
+			this.phase = "prompt"; // back to the message choice
+			this.refresh();
+			return;
+		}
+		// The Editor handles text, backspace, paste, and Enter (→ onSubmit).
+		this.editor.handleInput(data);
+		this.refresh();
 	}
 
 	private handleTwoChoice(data: string, phase: "confirm" | "view"): void {
@@ -322,8 +428,8 @@ class TimerScreen {
 		if (this.kb.matches(data, "tui.select.confirm")) {
 			if (phase === "confirm") {
 				if (this.choice === 1) {
-					this.onStart(this.minutes);
-					this.finish({ type: "started", minutes: this.minutes });
+					this.onStart(this.minutes, this.prompt);
+					this.finish({ type: "started", minutes: this.minutes, prompt: this.prompt });
 				} else {
 					this.phase = "adjust"; // Readjust
 					this.choice = 1;
@@ -400,6 +506,31 @@ class TimerScreen {
 			lines.push(` ${t.fg("dim", "type digits to enter directly · backspace edits")}`);
 			lines.push("");
 			lines.push(` ${t.fg("dim", "Enter continue · Esc cancel")}`);
+		} else if (this.phase === "prompt") {
+			lines.push(` ${t.fg("text", "Message to send when the timer ends")}`);
+			lines.push("");
+			const mk = (label: string, idx: 0 | 1) =>
+				idx === this.promptChoice
+					? t.bg("selectedBg", t.fg("text", ` ❯ ${label} `))
+					: t.fg("muted", `   ${label} `);
+			lines.push(` ${mk("proceed", 0)}`);
+			const customLabel =
+				this.prompt === PROCEED_PROMPT
+					? "Custom…"
+					: `Custom…  ${t.fg("dim", shorten(this.prompt, 40))}`;
+			lines.push(` ${mk(customLabel, 1)}`);
+			lines.push("");
+			lines.push(` ${t.fg("dim", "↑/↓ or ←/→ choose · Enter select · Esc back")}`);
+		} else if (this.phase === "input") {
+			lines.push(` ${t.fg("text", "Custom message")}`);
+			lines.push("");
+			lines.push(` ${t.fg("muted", "The exact user message pi will send when the timer ends:")}`);
+			lines.push("");
+			for (const line of this.editor.render(Math.max(1, w - 2))) {
+				lines.push(` ${line}`);
+			}
+			lines.push("");
+			lines.push(` ${t.fg("dim", "Enter confirm · Esc back")}`);
 		} else if (this.phase === "confirm") {
 			const endsAt = new Date(Date.now() + this.minutes * 60_000);
 			lines.push(` ${t.fg("text", "Start the timer?")}`);
@@ -408,8 +539,11 @@ class TimerScreen {
 			lines.push("");
 			lines.push(kv("Your time", formatLocal(endsAt)));
 			lines.push(kv("UTC", formatUTC(endsAt)));
-			lines.push("");
-			lines.push(` ${t.fg("muted", `When it ends, pi sends "${PROCEED_PROMPT}".`)}`);
+			const msgLines = wrapCompact(this.prompt, Math.max(4, w - 13), 3);
+			msgLines.forEach((mLine, i) => {
+				const label = i === 0 ? "Message".padEnd(11) : "".padEnd(11);
+				lines.push(` ${t.fg("muted", label)}${t.fg("text", mLine)}`);
+			});
 			lines.push("");
 			lines.push(this.renderButtons("Readjust", "Confirm"));
 			lines.push("");
@@ -425,7 +559,7 @@ class TimerScreen {
 				lines.push(kv("Your time", formatLocal(endsAt)));
 				lines.push(kv("UTC", formatUTC(endsAt)));
 				lines.push("");
-				lines.push(` ${t.fg("muted", `pi sends "${PROCEED_PROMPT}" when it ends.`)}`);
+				lines.push(` ${t.fg("muted", `pi sends "${shorten(st.prompt, 40)}" when it ends.`)}`);
 				lines.push("");
 				lines.push(this.renderButtons("Cancel", "Close"));
 				lines.push("");
@@ -448,6 +582,7 @@ class TimerScreen {
 interface TimerState {
 	endsAt: number;
 	totalMs: number;
+	prompt: string;
 	timeoutId: ReturnType<typeof setTimeout>;
 	tickId: ReturnType<typeof setInterval>;
 }
@@ -482,9 +617,9 @@ function lastFireStatusLine(): string {
 function lastFireStatusText(): string {
 	if (!lastFire) return "";
 	const time = fmtHM(new Date(lastFire.triggeredAt));
-	if (lastFire.status === "failed") return `✖ Timer done ${time} · ${lastFire.action} failed`;
+	if (lastFire.status === "failed") return `✖ Timer done ${time} · ${shorten(lastFire.action, 24)} failed`;
 	if (lastFire.status === "agent resumed") return `✅ Timer done ${time} · agent resumed`;
-	return `✅ Timer done ${time} · ${lastFire.action} dispatched`;
+	return `✅ Timer done ${time} · ${shorten(lastFire.action, 24)} dispatched`;
 }
 
 function statusText(text: string | undefined): void {
@@ -496,7 +631,12 @@ function statusText(text: string | undefined): void {
 	}
 }
 
-function startTimer(pi: ExtensionAPI, ctx: ExtensionCommandContext, minutes: number): void {
+function startTimer(
+	pi: ExtensionAPI,
+	ctx: ExtensionCommandContext,
+	minutes: number,
+	prompt: string = PROCEED_PROMPT,
+): void {
 	cancelTimer();
 	uiRef = ctx.ui;
 	ctxRef = ctx;
@@ -507,7 +647,7 @@ function startTimer(pi: ExtensionAPI, ctx: ExtensionCommandContext, minutes: num
 		if (!timer) return;
 		statusText(`⏳ ${formatDuration(timer.endsAt - Date.now())}`);
 	}, 1000);
-	timer = { endsAt, totalMs, timeoutId, tickId };
+	timer = { endsAt, totalMs, prompt, timeoutId, tickId };
 	statusText(`⏳ ${formatDuration(totalMs)}`);
 }
 
@@ -536,11 +676,11 @@ function fireTimer(pi: ExtensionAPI): void {
 
 	// Record the fire before dispatching: the agent_start event triggered by
 	// the send upgrades the record from "dispatched" to "agent resumed".
-	lastFire = { triggeredAt: Date.now(), action: PROCEED_PROMPT, status: "dispatched" };
+	lastFire = { triggeredAt: Date.now(), action: st.prompt, status: "dispatched" };
 
 	if (uiRef) {
 		try {
-			uiRef.notify(`⏰ Timer finished — sending "${PROCEED_PROMPT}"`, "info");
+			uiRef.notify(`⏰ Timer finished — sending "${shorten(st.prompt, 60)}"`, "info");
 		} catch {
 			// ignore
 		}
@@ -548,9 +688,9 @@ function fireTimer(pi: ExtensionAPI): void {
 	try {
 		const idle = ctx ? ctx.isIdle() : true;
 		if (idle) {
-			pi.sendUserMessage(PROCEED_PROMPT);
+			pi.sendUserMessage(st.prompt);
 		} else {
-			pi.sendUserMessage(PROCEED_PROMPT, { deliverAs: "followUp" });
+			pi.sendUserMessage(st.prompt, { deliverAs: "followUp" });
 		}
 		// Keep the result in the footer until the next timer starts.
 		statusText(lastFireStatusText());
@@ -560,7 +700,7 @@ function fireTimer(pi: ExtensionAPI): void {
 		statusText(lastFireStatusText());
 		if (uiRef) {
 			try {
-				uiRef.notify(`Timer finished, but sending "${PROCEED_PROMPT}" failed: ${lastFire.error}`, "error");
+				uiRef.notify(`Timer finished, but sending the message failed: ${lastFire.error}`, "error");
 			} catch {
 				// ignore
 			}
@@ -571,7 +711,7 @@ function fireTimer(pi: ExtensionAPI): void {
 async function runTimerUI(
 	pi: ExtensionAPI,
 	ctx: ExtensionCommandContext,
-	initial: { minutes?: number; phase?: "adjust" | "confirm" | "view" },
+	initial: { minutes?: number; phase?: "adjust" | "prompt" | "view" },
 ): Promise<void> {
 	const result = await ctx.ui.custom<TimerUIResult | undefined>((tui, theme, kb, done) => {
 		return new TimerScreen(
@@ -579,7 +719,7 @@ async function runTimerUI(
 			theme,
 			kb,
 			done,
-			(minutes) => startTimer(pi, ctx, minutes),
+			(minutes, prompt) => startTimer(pi, ctx, minutes, prompt),
 			() => cancelTimer(),
 			initial,
 		);
@@ -588,7 +728,7 @@ async function runTimerUI(
 	if (!result) return;
 	if (result.type === "started") {
 		ctx.ui.notify(
-			`Timer started — pi sends "${PROCEED_PROMPT}" in ${humanMinutes(result.minutes)}`,
+			`Timer started — pi sends "${shorten(result.prompt, 60)}" in ${humanMinutes(result.minutes)}`,
 			"info",
 		);
 	} else if (result.type === "cancelled") {
@@ -625,7 +765,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("timer", {
-		description: `Countdown timer — when it ends, pi sends "${PROCEED_PROMPT}"`,
+		description: `Countdown timer — sends "${PROCEED_PROMPT}" (or a custom message) when it ends`,
 		getArgumentCompletions: (prefix) => {
 			const items = [
 				{ value: "cancel", label: "cancel", description: "cancel the running timer" },
@@ -649,8 +789,8 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			// /timer <minutes> — skip straight to the confirm screen (or start
-			// directly when there is no interactive UI).
+			// /timer <minutes> — start at the message step with the given duration
+			// (or start directly with the default message when there is no UI).
 			if (/^\d{1,4}$/.test(trimmed)) {
 				const minutes = parseInt(trimmed, 10);
 				if (minutes < MIN_MINUTES || minutes > MAX_MINUTES) {
@@ -662,7 +802,7 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify(`Timer started — pi sends "${PROCEED_PROMPT}" in ${humanMinutes(minutes)}`, "info");
 					return;
 				}
-				await runTimerUI(pi, ctx, { minutes, phase: "confirm" });
+				await runTimerUI(pi, ctx, { minutes, phase: "prompt" });
 				return;
 			}
 

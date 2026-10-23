@@ -1,6 +1,6 @@
 {
 	"name": "pi-proceed-timer",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"description": "pi extension: a /timer countdown that sends \"proceed\" when it ends — for provider rate-limit waits",
 	"keywords": [
 		"pi-package"

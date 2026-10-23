@@ -41,7 +41,7 @@ const ACTION_KEYS = {
 	"tui.select.cancel": ["\x1b"],
 };
 const fakeKb = { matches: (data, action) => (ACTION_KEYS[action] ?? []).includes(data) };
-const fakeTui = { requestRender: () => {} };
+const fakeTui = { requestRender: () => {}, terminal: { rows: 40, columns: 120 } }; // Editor reads terminal.rows
 
 // --- load extension ----------------------------------------------------------
 
@@ -136,16 +136,21 @@ assert.match(stripAnsi(render()), /in 12 min →/);
 press("0");
 console.log("✓ digit entry + backspace work, conversion tracks the typed value");
 
-// 5. Enter → confirm screen with local + UTC times, Confirm preselected
+// 5. Enter → message choice (proceed default) → Enter → confirm screen
 press("\r");
+const promptText = stripAnsi(render());
+assert.match(promptText, /Message to send when the timer ends/);
+assert.match(promptText, /❯ proceed/);
+press("\r"); // proceed preselected
 const confirmText = stripAnsi(render());
 assert.match(confirmText, /Start the timer\?/);
 assert.match(confirmText, /Wait for 2 h\b/);
 assert.match(confirmText, /Your time\s+20\d\d-\d\d-\d\d \d\d:\d\d \(([^)]+)\)/);
 assert.match(confirmText, /UTC\s+20\d\d-\d\d-\d\d \d\d:\d\d UTC/);
+assert.match(confirmText, /Message\s+proceed/);
 assert.match(confirmText, /❯ Confirm/); // Confirm highlighted by default
 assert.ok(confirmText.indexOf("Confirm") > confirmText.indexOf("Readjust")); // order
-console.log("✓ confirm screen shows local + UTC target time, Confirm preselected");
+console.log("✓ message step (proceed default) → confirm screen with Message row");
 
 // 6. Readjust goes back to adjust with the value kept
 press("\x1b[D"); // left → Readjust
@@ -153,10 +158,11 @@ press("\r");
 assert.match(stripAnsi(render()), /120 min/);
 console.log("✓ Readjust returns to adjust screen keeping 120");
 
-// 7. Enter → confirm → Enter starts the timer
-press("\r"); // adjust → confirm
+// 7. Enter ×3 → message step → confirm → start
+press("\r"); // adjust → prompt
+press("\r"); // prompt (proceed) → confirm
 press("\r"); // confirm → start
-assert.deepStrictEqual(uiResult, { type: "started", minutes: 120 });
+assert.deepStrictEqual(uiResult, { type: "started", minutes: 120, prompt: "proceed" });
 assert.ok(/^⏳ 2:00:0/.test(lastStatus()), "status line set");
 console.log("✓ Enter starts timer (120 min), status line shows countdown");
 
@@ -191,15 +197,52 @@ press("\x1b");
 assert.strictEqual(uiResult, undefined);
 console.log("✓ Esc exits the adjust screen");
 
-// 12. /timer 5 → straight to confirm screen
+// 12. /timer 5 → message step with 5 min, straight through with Enter
 uiResult = undefined;
 openUI("5");
+const quickPrompt = stripAnsi(render());
+assert.match(quickPrompt, /Message to send when the timer ends/);
+press("\r"); // proceed → confirm
 assert.match(stripAnsi(render()), /Start the timer\?/);
-assert.match(stripAnsi(render()), /5 min/);
-press("\r");
-assert.deepStrictEqual(uiResult, { type: "started", minutes: 5 });
+assert.match(stripAnsi(render()), /Wait for 5 min/);
+press("\r"); // start
+assert.deepStrictEqual(uiResult, { type: "started", minutes: 5, prompt: "proceed" });
 screen.dispose();
-console.log("✓ /timer 5 skips straight to confirm and starts");
+console.log("✓ /timer 5 lands on the message step and starts with proceeds");
+
+// 12b. custom message flow: Custom… → input → confirm, memory across Readjust
+uiResult = undefined;
+openUI("10");
+press("\x1b[B"); // toggle to Custom…
+press("\r"); // → input phase
+assert.match(stripAnsi(render()), /Custom message/);
+press("\r"); // empty input must NOT advance
+assert.match(stripAnsi(render()), /Custom message/, "empty input stays");
+for (const ch of "continue the refactor") press(ch);
+press("\x7f"); // backspace works in the editor
+press("r");
+press("\r"); // → confirm
+const customConfirm = stripAnsi(render());
+assert.match(customConfirm, /Wait for 10 min/);
+assert.match(customConfirm, /Message\s+continue the refactor/);
+press("\x1b[D"); // Readjust
+press("\r"); // → adjust
+assert.match(stripAnsi(render()), /10 min/);
+press("\r"); // → prompt, Custom… still selected with the text remembered
+assert.match(stripAnsi(render()), /❯ Custom…  continue the refactor/);
+press("\r"); // → input, prefilled
+assert.match(stripAnsi(render()), /continue the refactor/);
+press("\x1b"); // Esc → back to prompt choice
+assert.match(stripAnsi(render()), /Message to send when the timer ends/);
+press("\x1b"); // Esc → back to adjust
+assert.match(stripAnsi(render()), /How many minutes/);
+press("\r"); // adjust → prompt (Custom… still selected)
+press("\x1b[B"); // toggle to proceed
+press("\r"); // proceed → confirm
+press("\r"); // start with proceed
+assert.deepStrictEqual(uiResult, { type: "started", minutes: 10, prompt: "proceed" });
+screen.dispose();
+console.log("✓ custom message flow: input, empty guard, memory across Readjust, Esc navigation");
 
 // --- fire path with mock timers ----------------------------------------------
 
@@ -216,6 +259,27 @@ assert.ok(notifications.some((n) => /Timer finished/.test(n.m)));
 assert.match(lastStatus(), /✅ Timer done \d\d:\d\d · proceed dispatched/, "result kept in footer");
 console.log('✓ timer fires, sends "proceed", footer keeps "✅ Timer done · dispatched"');
 
+// 13b. custom message fires with its exact text
+mock.timers.reset();
+mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+sentMessages.length = 0;
+statuses.length = 0;
+uiResult = undefined;
+openUI("1");
+press("\x1b[B"); // toggle to Custom…
+press("\r"); // → input
+for (const ch of "resume the build") press(ch);
+press("\r"); // → confirm
+assert.match(stripAnsi(render()), /Message\s+resume the build/);
+press("\r"); // start
+assert.deepStrictEqual(uiResult, { type: "started", minutes: 1, prompt: "resume the build" });
+screen.dispose();
+mock.timers.tick(61 * 60 * 1000);
+assert.ok(sentMessages.some((s) => s.content === "resume the build"), "custom text sent");
+assert.ok(notifications.some((n) => /sending "resume the build"/.test(n.m)));
+assert.match(lastStatus(), /✅ Timer done \d\d:\d\d · resume the build dispatched/);
+console.log('✓ custom message fires: sends exact text, footer shows it');
+
 // 14. agent_start upgrades dispatched → agent resumed
 registrations.events.agent_start();
 assert.match(lastStatus(), /✅ Timer done \d\d:\d\d · agent resumed/);
@@ -230,7 +294,7 @@ openUI("");
 const lastBlock = stripAnsi(render());
 assert.match(lastBlock, /Last timer/);
 assert.match(lastBlock, /Triggered\s+20\d\d-\d\d-\d\d \d\d:\d\d \(([^)]+)\)/);
-assert.match(lastBlock, /Action\s+proceed/);
+assert.match(lastBlock, /Action\s+resume the build/); // from the custom fire in 13b
 assert.match(lastBlock, /Status\s+agent resumed \d\d:\d\d/);
 console.log("✓ /timer setup screen shows the Last timer record");
 

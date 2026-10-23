@@ -39,7 +39,7 @@ Update the npm copy with `pi update --extensions`; remove any copy with
 | Command | Behavior |
 |---|---|
 | `/timer` | Interactive setup; while a timer runs, shows its status |
-| `/timer <minutes>` | Skip straight to the confirm screen (e.g. `/timer 300`) |
+| `/timer <minutes>` | Start at the message step with the given duration (e.g. `/timer 300`) |
 | `/timer cancel` | Cancel the running timer (works in every mode) |
 
 ### Setting the timer
@@ -75,6 +75,24 @@ Update the npm copy with `pi update --extensions`; remove any copy with
   on another day get a weekday prefix (`Sat 01:15`).
 - Range: 1–1440 minutes.
 
+### Choosing the message
+
+```
+──────────────────────────────────────────────
+ Message to send when the timer ends
+
+   ❯ proceed
+     Custom…
+
+ ↑/↓ or ←/→ choose · Enter select · Esc back
+──────────────────────────────────────────────
+```
+
+`proceed` is the default and preselected — one Enter accepts it. Pick
+`Custom…` to type any single-line message (Enter confirms, Backspace edits,
+Esc goes back; empty input is rejected). The wizard remembers your custom
+message across Readjust for quick reuse.
+
 ### Confirming
 
 ```
@@ -84,16 +102,16 @@ Update the npm copy with `pi update --extensions`; remove any copy with
 
  Your time   2026-10-23 09:30 (GMT-8)
  UTC         2026-10-23 17:30 UTC
-
- When it ends, pi sends "proceed".
+ Message     continue the refactor
 
    Readjust    ❯ Confirm
 
  ←/→ choose · Enter start · Esc cancel
 ```
 
-The target time is shown in **your timezone and UTC**. `Confirm` is the
-default; Enter again starts the timer.
+The target time is shown in **your timezone and UTC**, plus the exact
+message that will be sent (long messages wrap). `Confirm` is the default;
+Enter again starts the timer.
 
 ### While it runs
 
@@ -124,8 +142,9 @@ session is switched, reloaded, or closed.
   or `/reload` clears it (`session_shutdown`).
 - Non-interactive modes (RPC/print): use `/timer <minutes>` and
   `/timer cancel`; a bare `/timer` reports the remaining time.
-- The `proceed` text and timings are not configurable yet; edit
-  `extensions/timer.ts` constants if you need different behavior.
+- The message defaults to `proceed`; the wizard can set any single-line
+  message (capped at 200 characters). Timing constants live in
+  `extensions/timer.ts` if you need different behavior.
 - The timer sends proceed once at the scheduled time. It does not bypass provider rate limits or automatically detect when quotas reset. Pi must remain running for the timer to fire.  
 
 ## Development
